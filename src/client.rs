@@ -1,18 +1,30 @@
+use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 
 use crate::{
-    Result, WhatsAppApiConfig, WhatsAppMessage, media::normalize_mime_type, recipient::Recipient,
+    MediaMetadataResponse, MediaUploadResponse, Result, SendMessageResponse, WhatsAppApiConfig,
+    WhatsAppApiError, WhatsAppMessage, error::MetaError, media::normalize_mime_type,
+    recipient::Recipient,
 };
 
 #[derive(Clone)]
 pub struct WhatsAppApiClient {
     config: WhatsAppApiConfig,
+    http: reqwest::Client,
 }
 
 impl WhatsAppApiClient {
     pub fn new(config: WhatsAppApiConfig) -> Result<Self> {
         config.validate()?;
-        Ok(Self { config })
+        Ok(Self {
+            config,
+            http: reqwest::Client::new(),
+        })
+    }
+
+    pub fn with_http_client(config: WhatsAppApiConfig, http: reqwest::Client) -> Result<Self> {
+        config.validate()?;
+        Ok(Self { config, http })
     }
 
     pub fn config(&self) -> &WhatsAppApiConfig {
@@ -64,6 +76,26 @@ impl WhatsAppApiClient {
         }
     }
 
+    pub async fn send_message(
+        &self,
+        recipient: &Recipient,
+        message: &WhatsAppMessage,
+        options: SendMessageOptions,
+    ) -> Result<SendMessageResponse> {
+        self.execute_json(self.send_message_request(recipient, message, options))
+            .await
+    }
+
+    pub async fn send_text_message(
+        &self,
+        recipient: &Recipient,
+        body: impl Into<String>,
+        options: SendMessageOptions,
+    ) -> Result<SendMessageResponse> {
+        let message = WhatsAppMessage::text(body)?;
+        self.send_message(recipient, &message, options).await
+    }
+
     pub fn upload_media_request(
         &self,
         bytes: impl Into<Vec<u8>>,
@@ -84,6 +116,43 @@ impl WhatsAppApiClient {
         }
     }
 
+    pub async fn upload_media(
+        &self,
+        bytes: impl Into<Vec<u8>>,
+        filename: impl Into<String>,
+        mime_type: impl AsRef<str>,
+    ) -> Result<MediaUploadResponse> {
+        let request = self.upload_media_request(bytes, filename, mime_type);
+        let part = reqwest::multipart::Part::bytes(request.bytes)
+            .file_name(request.filename)
+            .mime_str(&request.media_type)
+            .map_err(WhatsAppApiError::decode)?;
+        let form = reqwest::multipart::Form::new()
+            .text("messaging_product", request.messaging_product)
+            .text("type", request.media_type)
+            .part("file", part);
+
+        let response = self
+            .http
+            .post(request.url)
+            .header(reqwest::header::AUTHORIZATION, request.authorization_header)
+            .multipart(form)
+            .send()
+            .await
+            .map_err(WhatsAppApiError::http)?;
+
+        decode_graph_json_response(response.status().as_u16(), &response_text(response).await?)
+    }
+
+    pub async fn send_media_message(
+        &self,
+        recipient: &Recipient,
+        message: &WhatsAppMessage,
+        options: SendMessageOptions,
+    ) -> Result<SendMessageResponse> {
+        self.send_message(recipient, message, options).await
+    }
+
     pub fn retrieve_media_request(&self, media_id: impl AsRef<str>) -> GraphJsonRequest {
         GraphJsonRequest {
             method: "GET",
@@ -96,6 +165,109 @@ impl WhatsAppApiClient {
             body: Value::Null,
         }
     }
+
+    pub async fn retrieve_media_metadata(
+        &self,
+        media_id: impl AsRef<str>,
+    ) -> Result<MediaMetadataResponse> {
+        self.execute_json(self.retrieve_media_request(media_id))
+            .await
+    }
+
+    pub async fn fetch_media_bytes(&self, url: impl AsRef<str>) -> Result<Vec<u8>> {
+        let response = self
+            .http
+            .get(url.as_ref())
+            .header(
+                reqwest::header::AUTHORIZATION,
+                self.config.authorization_header(),
+            )
+            .header(
+                reqwest::header::USER_AGENT,
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+                 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            )
+            .send()
+            .await
+            .map_err(WhatsAppApiError::http)?;
+
+        let status_code = response.status().as_u16();
+        let bytes = response.bytes().await.map_err(WhatsAppApiError::http)?;
+        if !(200..300).contains(&status_code) {
+            return Err(WhatsAppApiError::GraphApi {
+                status_code,
+                body: Value::String(String::from_utf8_lossy(&bytes).to_string()),
+                meta_error: None,
+            });
+        }
+        Ok(bytes.to_vec())
+    }
+
+    async fn execute_json<T: DeserializeOwned>(&self, request: GraphJsonRequest) -> Result<T> {
+        let authorization_header = request.authorization_header;
+        let response = match request.method {
+            "POST" => {
+                self.http
+                    .post(request.url)
+                    .header(reqwest::header::AUTHORIZATION, authorization_header)
+                    .json(&request.body)
+                    .send()
+                    .await
+            }
+            "DELETE" => {
+                let builder = self
+                    .http
+                    .delete(request.url)
+                    .header(reqwest::header::AUTHORIZATION, authorization_header);
+                if request.body.is_null() {
+                    builder.send().await
+                } else {
+                    builder.json(&request.body).send().await
+                }
+            }
+            _ => {
+                self.http
+                    .get(request.url)
+                    .header(reqwest::header::AUTHORIZATION, authorization_header)
+                    .send()
+                    .await
+            }
+        }
+        .map_err(WhatsAppApiError::http)?;
+
+        decode_graph_json_response(response.status().as_u16(), &response_text(response).await?)
+    }
+}
+
+async fn response_text(response: reqwest::Response) -> Result<String> {
+    response.text().await.map_err(WhatsAppApiError::http)
+}
+
+fn decode_graph_json_response<T: DeserializeOwned>(status_code: u16, body: &str) -> Result<T> {
+    let value = decode_graph_json_value(status_code, body)?;
+    serde_json::from_value(value).map_err(WhatsAppApiError::decode)
+}
+
+fn decode_graph_json_value(status_code: u16, body: &str) -> Result<Value> {
+    let value = if body.trim().is_empty() {
+        Value::Object(Map::new())
+    } else {
+        serde_json::from_str::<Value>(body).map_err(WhatsAppApiError::decode)?
+    };
+
+    if !(200..300).contains(&status_code) {
+        let meta_error = value
+            .get("error")
+            .cloned()
+            .and_then(|error| serde_json::from_value::<MetaError>(error).ok());
+        return Err(WhatsAppApiError::GraphApi {
+            status_code,
+            body: value,
+            meta_error,
+        });
+    }
+
+    Ok(value)
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -316,5 +488,63 @@ mod tests {
         let debug = format!("{request:?}");
         assert!(debug.contains("[redacted]"));
         assert!(!debug.contains("TOKEN"));
+    }
+
+    #[test]
+    fn successful_text_send_response_maps_meta_message_id() {
+        let response: SendMessageResponse = decode_graph_json_response(
+            200,
+            r#"{
+                "messages": [
+                    {"id": "wamid.1"}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(response.first_message_id(), Some("wamid.1"));
+    }
+
+    #[test]
+    fn meta_error_response_decodes_structured_error() {
+        let error = decode_graph_json_response::<SendMessageResponse>(
+            400,
+            r#"{
+                "error": {
+                    "message": "Invalid parameter",
+                    "type": "OAuthException",
+                    "code": 100,
+                    "error_subcode": 2018001,
+                    "fbtrace_id": "trace-1"
+                }
+            }"#,
+        )
+        .unwrap_err();
+
+        let WhatsAppApiError::GraphApi {
+            status_code,
+            body,
+            meta_error,
+        } = error
+        else {
+            panic!("expected GraphApi error");
+        };
+
+        assert_eq!(status_code, 400);
+        assert_eq!(body["error"]["message"], "Invalid parameter");
+        let meta_error = meta_error.unwrap();
+        assert_eq!(meta_error.message.as_deref(), Some("Invalid parameter"));
+        assert_eq!(meta_error.kind.as_deref(), Some("OAuthException"));
+        assert_eq!(meta_error.code, Some(100));
+        assert_eq!(meta_error.error_subcode, Some(2018001));
+        assert_eq!(meta_error.fbtrace_id.as_deref(), Some("trace-1"));
+    }
+
+    #[test]
+    fn invalid_success_json_maps_to_decode_error() {
+        assert!(matches!(
+            decode_graph_json_response::<SendMessageResponse>(200, "not json"),
+            Err(WhatsAppApiError::Decode { .. })
+        ));
     }
 }

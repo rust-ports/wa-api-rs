@@ -15,7 +15,7 @@ mod webhook;
 
 pub use client::{GraphJsonRequest, MediaUploadRequest, SendMessageOptions, WhatsAppApiClient};
 pub use config::{DEFAULT_GRAPH_API_VERSION, WhatsAppApiConfig};
-pub use error::{Result, WhatsAppApiError};
+pub use error::{MetaError, Result, WhatsAppApiError};
 pub use media::{
     MediaMetadataResponse, MediaUploadResponse, SendMessageResponse, SentMessageRef,
     normalize_mime_type,
