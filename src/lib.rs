@@ -25,4 +25,8 @@ pub use messages::{
     WhatsAppMessage,
 };
 pub use recipient::Recipient;
-pub use webhook::{WebhookChallengeParams, verify_webhook_challenge};
+pub use webhook::{
+    InboundMedia, InboundMessage, InboundMessageKind, ParsedAdReferral, ReactionUpdate,
+    StatusUpdate, WebhookChallengeParams, WebhookEvent, parse_webhook_event,
+    verify_request_signature, verify_webhook_challenge,
+};

@@ -17,6 +17,21 @@ pub enum WhatsAppApiError {
     #[error("webhook verify token did not match")]
     FailedToVerifyToken,
 
+    #[error("raw body is required when secure webhook validation is enabled")]
+    MissingRawBody,
+
+    #[error("x-hub-signature-256 is required for webhook validation")]
+    MissingSignature,
+
+    #[error("webhook signature verification failed")]
+    FailedToVerifySignature,
+
+    #[error("unexpected webhook payload: {message}")]
+    UnexpectedWebhookPayload {
+        message: &'static str,
+        http_status: u16,
+    },
+
     #[error("{field}: {message}")]
     Validation {
         field: &'static str,
