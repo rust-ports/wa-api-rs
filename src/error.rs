@@ -1,3 +1,9 @@
+//! SDK-level error types.
+//!
+//! Meta/Graph errors are preserved with status code and decoded error details
+//! for backend logging, while callers can still map them into their own public
+//! API error envelopes.
+
 use serde::Deserialize;
 use serde_json::Value;
 

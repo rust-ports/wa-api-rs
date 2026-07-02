@@ -1,10 +1,19 @@
-use serde_json::{Map, Value, json};
+//! Typed WhatsApp outbound message payloads.
+//!
+//! These types model only the message kinds currently needed by the backend and
+//! serialize to the nested JSON objects expected by the Cloud API.
+
+use serde::{
+    Serialize, Serializer,
+    ser::{Error as _, SerializeMap},
+};
 
 use crate::{Result, WhatsAppApiError};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TextMessage {
     pub body: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub preview_url: Option<bool>,
 }
 
@@ -27,15 +36,6 @@ impl TextMessage {
         self.preview_url = Some(preview_url);
         self
     }
-
-    fn to_value(&self) -> Value {
-        let mut object = Map::new();
-        object.insert("body".to_string(), json!(self.body));
-        if let Some(preview_url) = self.preview_url {
-            object.insert("preview_url".to_string(), json!(preview_url));
-        }
-        Value::Object(object)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,22 +52,27 @@ impl MediaReference {
     pub fn link(link: impl Into<String>) -> Self {
         Self::Link(link.into())
     }
+}
 
-    fn write_json(&self, object: &mut Map<String, Value>) {
+impl Serialize for MediaReference {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(1))?;
         match self {
-            Self::Id(id) => {
-                object.insert("id".to_string(), json!(id));
-            }
-            Self::Link(link) => {
-                object.insert("link".to_string(), json!(link));
-            }
+            Self::Id(id) => map.serialize_entry("id", id)?,
+            Self::Link(link) => map.serialize_entry("link", link)?,
         }
+        map.end()
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ImageMessage {
+    #[serde(flatten)]
     pub reference: MediaReference,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub caption: Option<String>,
 }
 
@@ -90,15 +95,13 @@ impl ImageMessage {
         self.caption = Some(caption.into());
         self
     }
-
-    fn to_value(&self) -> Value {
-        media_value(&self.reference, [("caption", self.caption.as_deref())])
-    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct VideoMessage {
+    #[serde(flatten)]
     pub reference: MediaReference,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub caption: Option<String>,
 }
 
@@ -114,15 +117,13 @@ impl VideoMessage {
         self.caption = Some(caption.into());
         self
     }
-
-    fn to_value(&self) -> Value {
-        media_value(&self.reference, [("caption", self.caption.as_deref())])
-    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AudioMessage {
+    #[serde(flatten)]
     pub reference: MediaReference,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub voice: Option<bool>,
 }
 
@@ -138,21 +139,15 @@ impl AudioMessage {
         self.voice = Some(voice);
         self
     }
-
-    fn to_value(&self) -> Value {
-        let mut object = Map::new();
-        self.reference.write_json(&mut object);
-        if let Some(voice) = self.voice {
-            object.insert("voice".to_string(), json!(voice));
-        }
-        Value::Object(object)
-    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DocumentMessage {
+    #[serde(flatten)]
     pub reference: MediaReference,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub caption: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub filename: Option<String>,
 }
 
@@ -173,18 +168,6 @@ impl DocumentMessage {
     pub fn with_filename(mut self, filename: impl Into<String>) -> Self {
         self.filename = Some(filename.into());
         self
-    }
-
-    fn to_value(&self) -> Value {
-        let mut object = Map::new();
-        self.reference.write_json(&mut object);
-        if let Some(caption) = self.caption.as_deref() {
-            object.insert("caption".to_string(), json!(caption));
-        }
-        if let Some(filename) = self.filename.as_deref() {
-            object.insert("filename".to_string(), json!(filename));
-        }
-        Value::Object(object)
     }
 }
 
@@ -211,15 +194,118 @@ impl WhatsAppMessage {
             Self::Document(_) => "document",
         }
     }
+}
 
-    pub fn to_value(&self) -> Value {
+impl Serialize for WhatsAppMessage {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
         match self {
-            Self::Text(message) => message.to_value(),
-            Self::Image(message) => message.to_value(),
-            Self::Video(message) => message.to_value(),
-            Self::Audio(message) => message.to_value(),
-            Self::Document(message) => message.to_value(),
+            Self::Text(message) => message.serialize(serializer),
+            Self::Image(message) => message.serialize(serializer),
+            Self::Video(message) => message.serialize(serializer),
+            Self::Audio(message) => message.serialize(serializer),
+            Self::Document(message) => message.serialize(serializer),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecipientType {
+    Individual,
+    Group,
+}
+
+impl RecipientType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Individual => "individual",
+            Self::Group => "group",
+        }
+    }
+}
+
+impl Serialize for RecipientType {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MessageContext {
+    pub message_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SendMessageRequest {
+    pub recipient_type: RecipientType,
+    pub to: Option<String>,
+    pub recipient: Option<String>,
+    pub message: WhatsAppMessage,
+    pub context: Option<MessageContext>,
+    pub biz_opaque_callback_data: Option<String>,
+}
+
+impl SendMessageRequest {
+    pub fn new(
+        recipient_type: RecipientType,
+        to: Option<String>,
+        recipient: Option<String>,
+        message: WhatsAppMessage,
+        context: Option<MessageContext>,
+        biz_opaque_callback_data: Option<String>,
+    ) -> Self {
+        Self {
+            recipient_type,
+            to,
+            recipient,
+            message,
+            context,
+            biz_opaque_callback_data,
+        }
+    }
+}
+
+impl Serialize for SendMessageRequest {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if self.to.is_none() && self.recipient.is_none() {
+            return Err(S::Error::custom(
+                "send message request requires `to` or `recipient`",
+            ));
+        }
+
+        let mut field_count = 4;
+        field_count += usize::from(self.to.is_some());
+        field_count += usize::from(self.recipient.is_some());
+        field_count += usize::from(self.context.is_some());
+        field_count += usize::from(self.biz_opaque_callback_data.is_some());
+
+        let mut map = serializer.serialize_map(Some(field_count))?;
+        map.serialize_entry("messaging_product", "whatsapp")?;
+        map.serialize_entry("recipient_type", &self.recipient_type)?;
+        if let Some(to) = self.to.as_deref() {
+            map.serialize_entry("to", to)?;
+        }
+        if let Some(recipient) = self.recipient.as_deref() {
+            map.serialize_entry("recipient", recipient)?;
+        }
+        let message_type = self.message.message_type();
+        map.serialize_entry("type", message_type)?;
+        map.serialize_entry(message_type, &self.message)?;
+        if let Some(context) = &self.context {
+            map.serialize_entry("context", context)?;
+        }
+        if let Some(callback_data) = self.biz_opaque_callback_data.as_deref() {
+            map.serialize_entry("biz_opaque_callback_data", callback_data)?;
+        }
+        map.end()
     }
 }
 
@@ -253,35 +339,21 @@ impl From<DocumentMessage> for WhatsAppMessage {
     }
 }
 
-fn media_value<const N: usize>(
-    reference: &MediaReference,
-    optional_strings: [(&str, Option<&str>); N],
-) -> Value {
-    let mut object = Map::new();
-    reference.write_json(&mut object);
-    for (key, value) in optional_strings {
-        if let Some(value) = value {
-            object.insert(key.to_string(), json!(value));
-        }
-    }
-    Value::Object(object)
-}
-
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
 
     #[test]
     fn text_message_serializes_like_current_dart_sdk() {
         assert_eq!(
-            TextMessage::new("hello").unwrap().to_value(),
+            serde_json::to_value(TextMessage::new("hello").unwrap()).unwrap(),
             json!({"body": "hello"})
         );
         assert_eq!(
-            TextMessage::new("hello")
-                .unwrap()
-                .with_preview_url(false)
-                .to_value(),
+            serde_json::to_value(TextMessage::new("hello").unwrap().with_preview_url(false))
+                .unwrap(),
             json!({"body": "hello", "preview_url": false})
         );
     }
@@ -289,21 +361,49 @@ mod tests {
     #[test]
     fn media_message_serializes_by_id_or_link() {
         assert_eq!(
-            ImageMessage::link("https://example.com/a.png")
-                .with_caption("A")
-                .to_value(),
+            serde_json::to_value(ImageMessage::link("https://example.com/a.png").with_caption("A"))
+                .unwrap(),
             json!({"link": "https://example.com/a.png", "caption": "A"})
         );
         assert_eq!(
-            AudioMessage::id("media-1").with_voice(true).to_value(),
+            serde_json::to_value(AudioMessage::id("media-1").with_voice(true)).unwrap(),
             json!({"id": "media-1", "voice": true})
         );
         assert_eq!(
-            DocumentMessage::id("media-2")
-                .with_caption("Doc")
-                .with_filename("doc.pdf")
-                .to_value(),
+            serde_json::to_value(
+                DocumentMessage::id("media-2")
+                    .with_caption("Doc")
+                    .with_filename("doc.pdf")
+            )
+            .unwrap(),
             json!({"id": "media-2", "caption": "Doc", "filename": "doc.pdf"})
+        );
+    }
+
+    #[test]
+    fn full_send_message_request_serializes_dynamic_message_key() {
+        let request = SendMessageRequest::new(
+            RecipientType::Individual,
+            Some("456".to_string()),
+            None,
+            WhatsAppMessage::from(TextMessage::new("hello").unwrap()),
+            Some(MessageContext {
+                message_id: "wamid.original".to_string(),
+            }),
+            Some("callback".to_string()),
+        );
+
+        assert_eq!(
+            serde_json::to_value(request).unwrap(),
+            json!({
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": "456",
+                "type": "text",
+                "text": {"body": "hello"},
+                "context": {"message_id": "wamid.original"},
+                "biz_opaque_callback_data": "callback"
+            })
         );
     }
 

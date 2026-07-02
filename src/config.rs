@@ -1,3 +1,9 @@
+//! Per-account WhatsApp API configuration.
+//!
+//! The backend creates one config from the tenant's connected WhatsApp account:
+//! Graph API version, phone number id, decrypted access token, app secret, and
+//! optional test Graph base URL.
+
 use std::fmt;
 
 use crate::{Result, WhatsAppApiError};
@@ -86,6 +92,8 @@ impl WhatsAppApiConfig {
 
 impl fmt::Debug for WhatsAppApiConfig {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Config often appears in startup diagnostics; redact every field that
+        // can authenticate or verify a platform account.
         formatter
             .debug_struct("WhatsAppApiConfig")
             .field("graph_api_version", &self.graph_api_version)

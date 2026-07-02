@@ -1,9 +1,8 @@
-//! Wared-focused WhatsApp Cloud API client.
+//! Rust boundary for WhatsApp Cloud API behavior used by the backend.
 //!
-//! This crate ports the WhatsApp behavior used by Wared. The current Dart SDK
-//! and backend routes define Wared compatibility, the original JS SDK is a
-//! design reference, and Meta's WhatsApp Cloud API docs remain the API
-//! correctness source of truth.
+//! The crate intentionally stops at the platform boundary: typed Graph API
+//! requests/responses, media helpers, webhook verification, and webhook parsing.
+//! Persistence, tenant resolution, and product policy stay in the backend.
 
 mod client;
 mod config;
