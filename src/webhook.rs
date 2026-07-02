@@ -65,8 +65,8 @@ pub fn verify_request_signature(
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum WebhookEvent {
-    Message(InboundMessage),
-    Status(StatusUpdate),
+    Message(Box<InboundMessage>),
+    Status(Box<StatusUpdate>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,7 +153,7 @@ pub struct StatusUpdate {
 }
 
 pub fn parse_webhook_event(data: &Value) -> Result<WebhookEvent> {
-    if !data.get("object").is_some() {
+    if data.get("object").is_none() {
         return Err(unexpected_payload("Invalid payload", 400));
     }
 
@@ -174,20 +174,20 @@ pub fn parse_webhook_event(data: &Value) -> Result<WebhookEvent> {
 
     if field.as_deref() == Some("messages") {
         if let Some(message) = first_map(value.get("messages")) {
-            return Ok(WebhookEvent::Message(parse_inbound_message(
+            return Ok(WebhookEvent::Message(Box::new(parse_inbound_message(
                 &phone_number_id,
                 message,
                 value,
                 data,
-            )));
+            ))));
         }
         if let Some(status) = first_map(value.get("statuses")) {
-            return Ok(WebhookEvent::Status(parse_status_update(
+            return Ok(WebhookEvent::Status(Box::new(parse_status_update(
                 &phone_number_id,
                 status,
                 value,
                 data,
-            )));
+            ))));
         }
     }
 
@@ -382,10 +382,10 @@ fn stored_media_type(kind: Option<&str>) -> Option<&'static str> {
 }
 
 fn filename_from_webhook_payload(payload: &Map<String, Value>, kind: &str) -> String {
-    if let Some(filename) = string_value(payload.get("filename")) {
-        if !filename.is_empty() {
-            return filename;
-        }
+    if let Some(filename) = string_value(payload.get("filename"))
+        && !filename.is_empty()
+    {
+        return filename;
     }
 
     let extension = match string_value(payload.get("mime_type")).as_deref() {

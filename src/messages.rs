@@ -11,7 +11,7 @@ pub struct TextMessage {
 impl TextMessage {
     pub fn new(body: impl Into<String>) -> Result<Self> {
         let body = body.into();
-        if body.len() > 4096 {
+        if body.chars().count() > 4096 {
             return Err(WhatsAppApiError::Validation {
                 field: "text.body",
                 message: "must be 4096 characters or less",
@@ -310,6 +310,7 @@ mod tests {
     #[test]
     fn text_body_matches_current_max_length() {
         assert!(TextMessage::new("x".repeat(4096)).is_ok());
+        assert!(TextMessage::new("م".repeat(4096)).is_ok());
         assert!(matches!(
             TextMessage::new("x".repeat(4097)),
             Err(WhatsAppApiError::Validation {

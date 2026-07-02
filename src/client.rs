@@ -196,7 +196,7 @@ impl WhatsAppApiClient {
         if !(200..300).contains(&status_code) {
             return Err(WhatsAppApiError::GraphApi {
                 status_code,
-                body: Value::String(String::from_utf8_lossy(&bytes).to_string()),
+                body: Box::new(Value::String(String::from_utf8_lossy(&bytes).to_string())),
                 meta_error: None,
             });
         }
@@ -262,8 +262,8 @@ fn decode_graph_json_value(status_code: u16, body: &str) -> Result<Value> {
             .and_then(|error| serde_json::from_value::<MetaError>(error).ok());
         return Err(WhatsAppApiError::GraphApi {
             status_code,
-            body: value,
-            meta_error,
+            body: Box::new(value),
+            meta_error: meta_error.map(Box::new),
         });
     }
 

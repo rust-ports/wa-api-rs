@@ -41,8 +41,8 @@ pub enum WhatsAppApiError {
     #[error("Graph API request failed with status {status_code}")]
     GraphApi {
         status_code: u16,
-        body: Value,
-        meta_error: Option<MetaError>,
+        body: Box<Value>,
+        meta_error: Option<Box<MetaError>>,
     },
 
     #[error("HTTP request failed: {message}")]
