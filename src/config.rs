@@ -54,10 +54,16 @@ impl WhatsAppApiConfig {
         self
     }
 
+    pub fn with_graph_base_url(mut self, graph_base_url: impl Into<String>) -> Self {
+        self.graph_base_url = graph_base_url.into();
+        self
+    }
+
     pub fn validate(&self) -> Result<()> {
         validate_not_blank("graph_api_version", &self.graph_api_version)?;
         validate_not_blank("phone_number_id", &self.phone_number_id)?;
         validate_not_blank("access_token", &self.access_token)?;
+        validate_not_blank("graph_base_url", &self.graph_base_url)?;
         if self.secure && self.app_secret.as_deref().unwrap_or("").trim().is_empty() {
             return Err(WhatsAppApiError::MissingAppSecret);
         }
@@ -154,5 +160,18 @@ mod tests {
         assert!(!debug.contains("ACCESS_TOKEN_VALUE"));
         assert!(!debug.contains("APP_SECRET_VALUE"));
         assert!(!debug.contains("VERIFY_TOKEN_VALUE"));
+    }
+
+    #[test]
+    fn graph_base_url_can_point_to_mock_graph_server() {
+        let config = WhatsAppApiConfig::for_phone_number("phone-id", "token")
+            .with_secure(false)
+            .with_graph_base_url("http://127.0.0.1:9876");
+
+        assert!(config.validate().is_ok());
+        assert_eq!(
+            config.graph_url("phone-id/messages"),
+            "http://127.0.0.1:9876/v24.0/phone-id/messages"
+        );
     }
 }
