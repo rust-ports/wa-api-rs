@@ -84,7 +84,7 @@ mod tests {
     }
 
     #[test]
-    fn mime_normalization_matches_dart_sdk_safe_defaults() {
+    fn mime_normalization_uses_safe_defaults() {
         assert_eq!(normalize_mime_type("   "), "application/octet-stream");
         assert_eq!(normalize_mime_type("text"), "text/octet-stream");
         assert_eq!(normalize_mime_type("image/png"), "image/png");

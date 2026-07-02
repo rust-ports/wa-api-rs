@@ -120,7 +120,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_api_version_matches_current_backend_default() {
+    fn default_api_version_matches_default_graph_version() {
         assert_eq!(DEFAULT_GRAPH_API_VERSION, "v24.0");
         assert_eq!(
             WhatsAppApiConfig::for_phone_number("phone-id", "token").graph_api_version,

@@ -1,18 +1,23 @@
 [package]
-name = "whatsapp_api_rust"
+name = "wa-api-rs"
 version = "0.1.0"
-edition.workspace = true
-license.workspace = true
-rust-version.workspace = true
+edition = "2024"
+license = "UNLICENSED"
+rust-version = "1.93"
+description = "A Rust client and webhook parser for the WhatsApp Cloud API."
+repository = "https://github.com/rust-ports/wa-api-rs"
+readme = "README.md"
+keywords = ["whatsapp", "cloud-api", "meta", "sdk"]
+categories = ["api-bindings", "web-programming::http-client"]
 
 [dependencies]
-hex.workspace = true
-hmac.workspace = true
-reqwest.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-sha2.workspace = true
-thiserror.workspace = true
+hex = "0.4"
+hmac = "0.12"
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
 
 [dev-dependencies]
-serde_json.workspace = true
+serde_json = "1"

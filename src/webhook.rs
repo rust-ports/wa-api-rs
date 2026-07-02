@@ -448,7 +448,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn webhook_challenge_matches_current_dart_sdk_behavior() {
+    fn webhook_challenge_matches_meta_contract() {
         assert_eq!(
             verify_webhook_challenge(
                 WebhookChallengeParams {
@@ -489,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn signature_validation_matches_current_dart_sdk_behavior() {
+    fn signature_validation_matches_meta_contract() {
         let body = r#"{"object":"whatsapp_business_account"}"#;
         let mut mac = HmacSha256::new_from_slice(b"SECRET").unwrap();
         mac.update(body.as_bytes());

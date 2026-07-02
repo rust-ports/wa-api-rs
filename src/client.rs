@@ -358,7 +358,7 @@ mod tests {
     }
 
     #[test]
-    fn text_send_request_matches_current_dart_sdk_shape() {
+    fn text_send_request_matches_cloud_api_shape() {
         let request = client().send_message_request(
             &Recipient::phone("456"),
             &TextMessage::new("Hi").unwrap().into(),
@@ -381,7 +381,7 @@ mod tests {
     }
 
     #[test]
-    fn reply_context_matches_current_dart_sdk_shape() {
+    fn reply_context_matches_cloud_api_shape() {
         let request = client().send_message_request(
             &Recipient::phone("456"),
             &TextMessage::new("Reply").unwrap().into(),
@@ -395,7 +395,7 @@ mod tests {
     }
 
     #[test]
-    fn media_send_request_shapes_match_gateway_mapping() {
+    fn media_send_request_shapes_match_cloud_api() {
         let cases = [
             (
                 ImageMessage::id("media-image")
@@ -453,7 +453,7 @@ mod tests {
     }
 
     #[test]
-    fn media_upload_request_contains_current_dart_sdk_fields() {
+    fn media_upload_request_contains_cloud_api_fields() {
         let request = client().upload_media_request([1, 2, 3], "clipboard-image.png", "image/png");
 
         assert_eq!(request.method, "POST");

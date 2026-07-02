@@ -272,7 +272,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn text_message_serializes_like_current_dart_sdk() {
+    fn text_message_serializes_to_cloud_api_shape() {
         assert_eq!(
             TextMessage::new("hello").unwrap().to_value(),
             json!({"body": "hello"})
@@ -308,7 +308,7 @@ mod tests {
     }
 
     #[test]
-    fn text_body_matches_current_max_length() {
+    fn text_body_matches_cloud_api_max_length() {
         assert!(TextMessage::new("x".repeat(4096)).is_ok());
         assert!(TextMessage::new("م".repeat(4096)).is_ok());
         assert!(matches!(
