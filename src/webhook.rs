@@ -690,6 +690,41 @@ mod tests {
     }
 
     #[test]
+    fn parses_unsupported_message_kind_without_rejecting_payload() {
+        let event = parse_webhook_event(&json!({
+            "object": "whatsapp_business_account",
+            "entry": [{
+                "changes": [{
+                    "field": "messages",
+                    "value": {
+                        "metadata": {"phone_number_id": "123"},
+                        "messages": [{
+                            "id": "wamid.location",
+                            "from": "456",
+                            "type": "location",
+                            "location": {
+                                "latitude": 30.0,
+                                "longitude": 31.0
+                            }
+                        }]
+                    }
+                }]
+            }]
+        }))
+        .unwrap();
+
+        let WebhookEvent::Message(message) = event else {
+            panic!("expected message event");
+        };
+        assert_eq!(
+            message.kind,
+            InboundMessageKind::Unsupported("location".to_string())
+        );
+        assert_eq!(message.preview, "[location message]");
+        assert_eq!(message.message_id.as_deref(), Some("wamid.location"));
+    }
+
+    #[test]
     fn rejects_unexpected_payload_shapes() {
         assert_eq!(
             parse_webhook_event(&json!({})),
