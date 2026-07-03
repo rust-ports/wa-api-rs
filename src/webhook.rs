@@ -1,3 +1,9 @@
+//! Webhook verification and parser helpers.
+//!
+//! This module validates Meta webhook challenges/signatures and converts raw
+//! WhatsApp webhook JSON into typed events that the backend can process
+//! idempotently.
+
 use hmac::{Hmac, Mac};
 use serde_json::{Map, Value};
 use sha2::Sha256;
@@ -36,6 +42,9 @@ pub fn verify_request_signature(
     signature: Option<&str>,
     app_secret: Option<&str>,
 ) -> Result<()> {
+    // HMAC validation must use the exact raw body received by the HTTP route.
+    // Re-serializing JSON can change whitespace or field order and invalidate a
+    // legitimate Meta signature.
     let raw_body = raw_body.ok_or(WhatsAppApiError::MissingRawBody)?;
     let signature = signature
         .filter(|value| !value.trim().is_empty())
@@ -153,6 +162,9 @@ pub struct StatusUpdate {
 }
 
 pub fn parse_webhook_event(data: &Value) -> Result<WebhookEvent> {
+    // Meta wraps events inside entry/change arrays. This parser extracts the
+    // first message or status event and leaves multi-event iteration to the
+    // backend webhook route when it needs to process batches.
     if data.get("object").is_none() {
         return Err(unexpected_payload("Invalid payload", 400));
     }
@@ -675,6 +687,41 @@ mod tests {
         assert_eq!(status.recipient_id.as_deref(), Some("456"));
         assert_eq!(status.biz_opaque_callback_data.as_deref(), Some("opaque"));
         assert_eq!(status.conversation, Some(json!({"id": "conv"})));
+    }
+
+    #[test]
+    fn parses_unsupported_message_kind_without_rejecting_payload() {
+        let event = parse_webhook_event(&json!({
+            "object": "whatsapp_business_account",
+            "entry": [{
+                "changes": [{
+                    "field": "messages",
+                    "value": {
+                        "metadata": {"phone_number_id": "123"},
+                        "messages": [{
+                            "id": "wamid.location",
+                            "from": "456",
+                            "type": "location",
+                            "location": {
+                                "latitude": 30.0,
+                                "longitude": 31.0
+                            }
+                        }]
+                    }
+                }]
+            }]
+        }))
+        .unwrap();
+
+        let WebhookEvent::Message(message) = event else {
+            panic!("expected message event");
+        };
+        assert_eq!(
+            message.kind,
+            InboundMessageKind::Unsupported("location".to_string())
+        );
+        assert_eq!(message.preview, "[location message]");
+        assert_eq!(message.message_id.as_deref(), Some("wamid.location"));
     }
 
     #[test]

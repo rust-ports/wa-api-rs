@@ -1,3 +1,8 @@
+//! Media response DTOs and small media helpers.
+//!
+//! Upload/send responses are intentionally tiny wrappers around Meta's response
+//! shape; backend policy decides how to store media files and metadata.
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -39,6 +44,8 @@ pub struct SentMessageRef {
 }
 
 pub fn normalize_mime_type(mime_type: &str) -> String {
+    // File pickers and OS integrations may provide blank or malformed MIME
+    // strings. Normalize to a MIME-looking value before multipart upload.
     let trimmed = mime_type.trim();
     if trimmed.is_empty() {
         return "application/octet-stream".to_string();

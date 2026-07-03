@@ -1,9 +1,18 @@
-use serde::de::DeserializeOwned;
-use serde_json::{Map, Value, json};
+//! HTTP client and request builders for the WhatsApp Graph API.
+//!
+//! Public methods expose both executable async calls and request-builder helpers
+//! so backend tests can assert exact Graph URLs, headers, and JSON payloads
+//! without hitting Meta.
+
+use serde::{Serialize, de::DeserializeOwned};
+use serde_json::Value;
 
 use crate::{
     MediaMetadataResponse, MediaUploadResponse, Result, SendMessageResponse, WhatsAppApiConfig,
-    WhatsAppApiError, WhatsAppMessage, error::MetaError, media::normalize_mime_type,
+    WhatsAppApiError, WhatsAppMessage,
+    error::MetaError,
+    media::normalize_mime_type,
+    messages::{MessageContext, RecipientType, SendMessageRequest},
     recipient::Recipient,
 };
 
@@ -37,34 +46,22 @@ impl WhatsAppApiClient {
         message: &WhatsAppMessage,
         options: SendMessageOptions,
     ) -> GraphJsonRequest {
-        let message_type = message.message_type();
-        let mut body = Map::new();
-        body.insert("messaging_product".to_string(), json!("whatsapp"));
-        body.insert(
-            "recipient_type".to_string(),
-            json!(if recipient.is_group() {
-                "group"
+        // Centralize Graph JSON construction here so backend route handlers
+        // choose intent, while the SDK owns Meta's field names and nesting.
+        let body = SendMessageRequest::new(
+            if recipient.is_group() {
+                RecipientType::Group
             } else {
-                "individual"
-            }),
+                RecipientType::Individual
+            },
+            recipient.send_to().map(ToOwned::to_owned),
+            recipient.business_scoped_user_id().map(ToOwned::to_owned),
+            message.clone(),
+            options
+                .context_message_id
+                .map(|message_id| MessageContext { message_id }),
+            options.biz_opaque_callback_data,
         );
-        if let Some(to) = recipient.send_to() {
-            body.insert("to".to_string(), json!(to));
-        }
-        if let Some(recipient_id) = recipient.business_scoped_user_id() {
-            body.insert("recipient".to_string(), json!(recipient_id));
-        }
-        body.insert("type".to_string(), json!(message_type));
-        body.insert(message_type.to_string(), message.to_value());
-        if let Some(context_message_id) = options.context_message_id {
-            body.insert(
-                "context".to_string(),
-                json!({"message_id": context_message_id}),
-            );
-        }
-        if let Some(callback_data) = options.biz_opaque_callback_data {
-            body.insert("biz_opaque_callback_data".to_string(), json!(callback_data));
-        }
 
         GraphJsonRequest {
             method: "POST",
@@ -72,7 +69,7 @@ impl WhatsAppApiClient {
                 .config
                 .graph_url(format!("{}/messages", self.config.phone_number_id)),
             authorization_header: self.config.authorization_header(),
-            body: Value::Object(body),
+            body: Some(GraphJsonBody::SendMessage(body)),
         }
     }
 
@@ -162,7 +159,7 @@ impl WhatsAppApiClient {
                 self.config.phone_number_id
             ),
             authorization_header: self.config.authorization_header(),
-            body: Value::Null,
+            body: None,
         }
     }
 
@@ -207,22 +204,25 @@ impl WhatsAppApiClient {
         let authorization_header = request.authorization_header;
         let response = match request.method {
             "POST" => {
-                self.http
+                let builder = self
+                    .http
                     .post(request.url)
-                    .header(reqwest::header::AUTHORIZATION, authorization_header)
-                    .json(&request.body)
-                    .send()
-                    .await
+                    .header(reqwest::header::AUTHORIZATION, authorization_header);
+                if let Some(body) = request.body.as_ref() {
+                    builder.json(body).send().await
+                } else {
+                    builder.send().await
+                }
             }
             "DELETE" => {
                 let builder = self
                     .http
                     .delete(request.url)
                     .header(reqwest::header::AUTHORIZATION, authorization_header);
-                if request.body.is_null() {
-                    builder.send().await
+                if let Some(body) = request.body.as_ref() {
+                    builder.json(body).send().await
                 } else {
-                    builder.json(&request.body).send().await
+                    builder.send().await
                 }
             }
             _ => {
@@ -250,7 +250,7 @@ fn decode_graph_json_response<T: DeserializeOwned>(status_code: u16, body: &str)
 
 fn decode_graph_json_value(status_code: u16, body: &str) -> Result<Value> {
     let value = if body.trim().is_empty() {
-        Value::Object(Map::new())
+        Value::Object(serde_json::Map::new())
     } else {
         serde_json::from_str::<Value>(body).map_err(WhatsAppApiError::decode)?
     };
@@ -290,23 +290,47 @@ pub struct GraphJsonRequest {
     pub method: &'static str,
     pub url: String,
     authorization_header: String,
-    pub body: Value,
+    body: Option<GraphJsonBody>,
 }
 
 impl GraphJsonRequest {
     pub fn authorization_header(&self) -> &str {
         &self.authorization_header
     }
+
+    pub fn body_json(&self) -> Option<Value> {
+        self.body.as_ref().map(|body| {
+            serde_json::to_value(body).expect("typed Graph request body should serialize")
+        })
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+enum GraphJsonBody {
+    SendMessage(SendMessageRequest),
+}
+
+impl Serialize for GraphJsonBody {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::SendMessage(body) => body.serialize(serializer),
+        }
+    }
 }
 
 impl std::fmt::Debug for GraphJsonRequest {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Debug output is safe for tests and diagnostics only if credentials
+        // never appear in formatted request structs.
         formatter
             .debug_struct("GraphJsonRequest")
             .field("method", &self.method)
             .field("url", &self.url)
             .field("authorization_header", &"[redacted]")
-            .field("body", &self.body)
+            .field("body", &self.body_json())
             .finish()
     }
 }
@@ -330,6 +354,8 @@ impl MediaUploadRequest {
 
 impl std::fmt::Debug for MediaUploadRequest {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Media uploads can be large and sensitive. Log metadata and byte
+        // length, not the bearer token or file bytes.
         formatter
             .debug_struct("MediaUploadRequest")
             .field("method", &self.method)
@@ -369,7 +395,7 @@ mod tests {
         assert_eq!(request.url, "https://graph.facebook.com/v24.0/123/messages");
         assert_eq!(request.authorization_header(), "Bearer TOKEN");
         assert_eq!(
-            request.body,
+            request.body_json().unwrap(),
             json!({
                 "messaging_product": "whatsapp",
                 "recipient_type": "individual",
@@ -389,7 +415,7 @@ mod tests {
         );
 
         assert_eq!(
-            request.body["context"],
+            request.body_json().unwrap()["context"],
             json!({"message_id": "wamid.original"})
         );
     }
@@ -444,9 +470,10 @@ mod tests {
                 &message,
                 Default::default(),
             );
-            assert_eq!(request.body["type"], expected["type"]);
+            let body = request.body_json().unwrap();
+            assert_eq!(body["type"], expected["type"]);
             assert_eq!(
-                request.body[expected["type"].as_str().unwrap()],
+                body[expected["type"].as_str().unwrap()],
                 expected[expected["type"].as_str().unwrap()]
             );
         }

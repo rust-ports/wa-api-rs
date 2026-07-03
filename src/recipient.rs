@@ -1,3 +1,9 @@
+//! Recipient addressing for outbound messages.
+//!
+//! The Cloud API can address normal phone recipients, groups, and
+//! business-scoped user ids. The message client converts these variants into
+//! the right `to`, `recipient`, and `recipient_type` fields.
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Recipient {
     Phone(String),
